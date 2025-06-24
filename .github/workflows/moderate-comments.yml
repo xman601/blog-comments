@@ -11,53 +11,54 @@ jobs:
   moderate:
     runs-on: ubuntu-latest
     steps:
-      - name: Hide offensive comments
+      - name: Moderate discussion comments
         uses: actions/github-script@v7
         with:
           script: |
             const bannedWords = [
-              "fuck", "shit", "bitch", "asshole", "dick", "pussy", "cock", "faggot", "cunt", "motherfucker",
-              "nigger", "nigga", "whore", "slut", "bastard", "damn", "crap", "bloody", "bollocks", "bugger",
-              "arse", "twat", "wanker", "suck", "kill", "rape", "sex", "porn", "nude", "naked", "xxx", "fetish",
-              "incest", "bestiality", "zoophilia", "pedophile", "pedo", "childporn", "erotic", "adult", "gore",
-              "violence", "terrorist", "terrorism"
-            ];
+            "fuck", "shit", "bitch", "asshole", "dick", "pussy", "cock", "faggot", "cunt", "motherfucker",
+            "nigger", "nigga", "whore", "slut", "bastard", "damn", "crap", "bloody", "bollocks", "bugger",
+            "arse", "twat", "wanker", "suck", "kill", "rape", "sex", "porn", "nude", "naked", "xxx", "fetish",
+            "incest", "bestiality", "zoophilia", "pedophile", "pedo", "childporn", "erotic", "adult", "gore",
+            "violence", "terrorist", "terrorism"
+          ];
 
-            const commentBody = context.payload.comment.body.toLowerCase();
+          const commentBody = context.payload.comment.body.toLowerCase();
 
-            const isBanned = bannedWords.some(word => {
-              const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-              return regex.test(commentBody);
+          const isBanned = bannedWords.some(word => {
+            const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+            return regex.test(commentBody);
+          });
+
+          if (isBanned) {
+            console.log("🚫 Offensive content detected. Hiding comment...");
+
+            const subjectId = context.payload.comment.node_id;
+
+            const mutation = `
+              mutation {
+                minimizeComment(input: {
+                  subjectId: "${subjectId}"
+                  classifier: OFF_TOPIC
+                }) {
+                  clientMutationId
+                }
+              }
+            `;
+
+            await github.graphql(mutation);
+
+            await github.rest.issues.createComment({
+              issue_number: context.payload.discussion.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `⚠️ A comment was hidden for violating community guidelines.`
             });
 
-            if (isBanned) {
-              console.log("🚫 Offensive content detected. Attempting to hide comment...");
+            console.log("✅ Comment hidden successfully.");
+          } else {
+            console.log("✅ Comment passed filter.");
+          }
 
-              const subjectId = context.payload.comment.node_id;
-
-              const mutation = `
-                mutation {
-                  minimizeComment(input: {
-                    subjectId: "${subjectId}"
-                    classifier: OFF_TOPIC
-                  }) {
-                    minimizedComment {
-                      id
-                    }
-                  }
-                }
-              `;
-
-              await github.graphql(mutation);
-
-              await github.rest.issues.createComment({
-                issue_number: context.payload.discussion.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: `⚠️ A comment was hidden for violating community guidelines. Please keep discussions respectful.`
-              });
-
-              console.log("✅ Comment successfully hidden.");
-            } else {
-              console.log("✅ Comment is clean.");
+            return isBanned;
             }
