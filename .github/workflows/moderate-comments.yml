@@ -1,0 +1,60 @@
+name: Moderate Comments
+
+on:
+  discussion_comment:
+    types: [created]
+
+permissions:
+  discussions: write
+
+jobs:
+  moderate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Moderate discussion comments
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const bannedWords = [
+              // Profanity
+              "fuck", "shit", "bitch", "asshole", "dick", "pussy", "cock", "faggot", "cunt", "motherfucker",
+              "nigger", "nigga", "whore", "slut", "bastard", "damn", "crap", "bloody", "bollocks", "bugger",
+              "arse", "twat", "wanker", "suck",
+
+              // Sexual and adult terms
+              "sex", "porn", "nude", "naked", "xxx", "fetish", "incest", "bestiality", "zoophilia", "pedophile",
+              "pedo", "childporn", "child porn", "erotic", "erotica", "adult", "milf", "dildo", "vagina", "penis",
+
+              // Violence and threats
+              "kill", "rape", "gore", "violence", "terrorist", "terrorism", "bomb", "shoot", "murder", "suicide",
+
+              // Hate speech and slurs
+              "racist", "homophobe", "jew", "kike", "chink", "spic", "gypsy", "retard", "idiot", "moron",
+
+              // Other offensive terms
+              "ass", "cockroach", "shithead", "jackass", "douche", "slutty", "skank", "twatface"
+            ];
+
+            const commentBody = context.payload.comment.body.toLowerCase();
+
+            const isBanned = bannedWords.some(word => {
+              const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+              return regex.test(commentBody);
+            });
+
+            if (isBanned) {
+              console.log(`Comment contains banned words. Deleting...`);
+
+              await github.rest.discussions.deleteComment({
+                discussion_comment_id: context.payload.comment.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              });
+
+              await github.rest.issues.createComment({
+                issue_number: context.payload.discussion.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `⚠️ A comment was removed due to inappropriate language. Please keep discussions respectful and PG-rated.`
+              });
+            }
