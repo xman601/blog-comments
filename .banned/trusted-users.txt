@@ -1,0 +1,7 @@
+# Trusted Users
+# Add usernames (one per line) of users who should bypass all moderation
+# These users' comments will never be hidden automatically
+# Example:
+# blog-owner
+# trusted-moderator
+# verified-user

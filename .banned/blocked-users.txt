@@ -1,0 +1,5 @@
+# Blocked Users
+# Add usernames (one per line) of users who should have all their comments automatically hidden
+# Example:
+# spam-user-123
+# offensive-commenter

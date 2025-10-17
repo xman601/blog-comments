@@ -2,10 +2,14 @@ name: Moderate Comments
 
 on:
   discussion_comment:
-    types: [created]
+    types: [created, edited]
+  discussion:
+    types: [created, edited]
 
 permissions:
   discussions: write
+  issues: write
+  contents: read
 
 jobs:
   moderate:
@@ -20,30 +24,60 @@ jobs:
           script: |
             const fs = require('fs');
 
+            // Helper function to read file safely
+            function readFileIfExists(path) {
+              try {
+                return fs.readFileSync(path, 'utf-8');
+              } catch (error) {
+                console.log(`⚠️ Could not read ${path}: ${error.message}`);
+                return '';
+              }
+            }
+
             // Read banned words from external file
-            const bannedWordsRaw = fs.readFileSync('.banned/banned-words.txt', 'utf-8');
+            const bannedWordsRaw = readFileIfExists('.banned/banned-words.txt');
             const bannedWords = bannedWordsRaw
               .split('\n')
               .map(w => w.trim().toLowerCase())
-              .filter(Boolean); // remove empty lines
+              .filter(Boolean);
 
-            const commentBody = context.payload.comment.body.toLowerCase();
+            // Read blocked users list
+            const blockedUsersRaw = readFileIfExists('.banned/blocked-users.txt');
+            const blockedUsers = blockedUsersRaw
+              .split('\n')
+              .map(u => u.trim().toLowerCase())
+              .filter(Boolean);
 
-            const isBanned = bannedWords.some(word => {
-              const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-              return regex.test(commentBody);
-            });
+            // Read trusted users list
+            const trustedUsersRaw = readFileIfExists('.banned/trusted-users.txt');
+            const trustedUsers = trustedUsersRaw
+              .split('\n')
+              .map(u => u.trim().toLowerCase())
+              .filter(Boolean);
 
-            if (isBanned) {
-              console.log("🚫 Offensive content detected. Hiding comment...");
+            // Get comment details
+            const comment = context.payload.comment || context.payload.discussion;
+            const commentBody = comment.body.toLowerCase();
+            const author = comment.user.login.toLowerCase();
+            const subjectId = comment.node_id;
 
-              const subjectId = context.payload.comment.node_id;
+            console.log(`🔍 Moderating comment from @${author}`);
 
+            // Skip moderation for trusted users
+            if (trustedUsers.includes(author)) {
+              console.log(`✅ @${author} is a trusted user. Skipping moderation.`);
+              return;
+            }
+
+            // Check if user is blocked
+            if (blockedUsers.includes(author)) {
+              console.log(`🚫 @${author} is blocked. Hiding comment...`);
+              
               const mutation = `
                 mutation {
                   minimizeComment(input: {
                     subjectId: "${subjectId}"
-                    classifier: OFF_TOPIC
+                    classifier: SPAM
                   }) {
                     clientMutationId
                   }
@@ -51,15 +85,89 @@ jobs:
               `;
 
               await github.graphql(mutation);
+              console.log(`✅ Comment from blocked user @${author} hidden.`);
+              return;
+            }
 
-              await github.rest.issues.createComment({
-                issue_number: context.payload.discussion.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: `⚠️ A comment was hidden for violating community guidelines.`
-              });
+            // Check for banned words
+            const foundBannedWords = bannedWords.filter(word => {
+              const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+              return regex.test(commentBody);
+            });
 
-              console.log("✅ Comment hidden successfully.");
+            // Spam detection patterns
+            const spamPatterns = [
+              /https?:\/\/[^\s]+\.(tk|ml|ga|cf|click|link)/i, // Suspicious domains
+              /(buy now|click here|limited time|act fast|urgent|free money|make money|work from home)/i,
+              /([a-z])\1{4,}/i, // Repeated characters (aaaaa)
+              /^.{0,10}$/,  // Very short comments (potential spam)
+              /(.)\\1{10,}/, // Long repeated sequences
+              /[A-Z]{10,}/, // All caps (excessive)
+              /(.)\\s*\\1\\s*\\1\\s*\\1\\s*\\1/i, // Spaced repeated chars (a a a a a)
+              /(.)(-|_|\\.|\\s)\\1(-|_|\\.|\\s)\\1/i, // Pattern like a-a-a or a.a.a
+            ];
+
+            const isSpam = spamPatterns.some(pattern => pattern.test(commentBody));
+            
+            // Check for excessive links
+            const linkCount = (commentBody.match(/https?:\/\//g) || []).length;
+            const hasExcessiveLinks = linkCount > 3;
+
+            // Check for excessive emojis
+            const emojiCount = (commentBody.match(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu) || []).length;
+            const hasExcessiveEmojis = emojiCount > 10;
+
+            let violationType = null;
+            let classifier = 'OFF_TOPIC';
+            
+            if (foundBannedWords.length > 0) {
+              violationType = 'offensive language';
+              classifier = 'ABUSE';
+              console.log(`🚫 Banned words detected: ${foundBannedWords.join(', ')}`);
+            } else if (isSpam || hasExcessiveLinks || hasExcessiveEmojis) {
+              violationType = 'spam';
+              classifier = 'SPAM';
+              console.log(`🚫 Spam detected: links=${linkCount}, emojis=${emojiCount}, patterns=${isSpam}`);
+            }
+
+            if (violationType) {
+              console.log(`🚫 ${violationType} detected. Hiding comment...`);
+
+              const mutation = `
+                mutation {
+                  minimizeComment(input: {
+                    subjectId: "${subjectId}"
+                    classifier: ${classifier}
+                  }) {
+                    clientMutationId
+                  }
+                }
+              `;
+
+              try {
+                await github.graphql(mutation);
+                console.log(`✅ Comment hidden successfully for ${violationType}.`);
+
+                // Create moderation log comment
+                const logMessage = `⚠️ **Moderation Action**: A comment was hidden for ${violationType}.\\n\\n` +
+                  `**Author**: @${comment.user.login}\\n` +
+                  `**Reason**: ${violationType}\\n` +
+                  `**Time**: ${new Date().toISOString()}\\n\\n` +
+                  `*This action was performed automatically. If you believe this was an error, please contact the moderators.*`;
+
+                // Only create log comment for discussions, not for individual comments
+                if (context.payload.discussion) {
+                  await github.rest.discussions.createComment({
+                    discussion_number: context.payload.discussion.number,
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    body: logMessage
+                  });
+                }
+
+              } catch (error) {
+                console.error(`❌ Failed to hide comment: ${error.message}`);
+              }
             } else {
-              console.log("✅ Comment passed filter.");
+              console.log(`✅ Comment from @${author} passed all filters.`);
             }
