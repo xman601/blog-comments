@@ -155,14 +155,30 @@ jobs:
                   `**Time**: ${new Date().toISOString()}\\n\\n` +
                   `*This action was performed automatically. If you believe this was an error, please contact the moderators.*`;
 
-                // Only create log comment for discussions, not for individual comments
-                if (context.payload.discussion) {
-                  await github.rest.discussions.createComment({
-                    discussion_number: context.payload.discussion.number,
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    body: logMessage
-                  });
+                // Create moderation log comment - handle both discussion and discussion_comment events
+                try {
+                  if (context.payload.discussion) {
+                    // Direct discussion event
+                    await github.rest.discussions.createComment({
+                      discussion_number: context.payload.discussion.number,
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      body: logMessage
+                    });
+                  } else if (context.payload.comment && context.payload.comment.discussion_url) {
+                    // Discussion comment event - extract discussion number from URL
+                    const discussionUrl = context.payload.comment.discussion_url;
+                    const discussionNumber = discussionUrl.split('/').pop();
+                    
+                    await github.rest.discussions.createComment({
+                      discussion_number: parseInt(discussionNumber),
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      body: logMessage
+                    });
+                  }
+                } catch (logError) {
+                  console.log(`⚠️ Could not create moderation log: ${logError.message}`);
                 }
 
               } catch (error) {
