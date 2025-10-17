@@ -1,1 +1,15 @@
 .DS_Store
+
+# Banned words list - keep out of repo for security
+.banned/banned-words.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv

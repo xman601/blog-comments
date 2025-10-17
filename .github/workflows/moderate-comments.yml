@@ -18,11 +18,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
       - name: Moderate discussion comments
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
+            const { execSync } = require('child_process');
 
             // Helper function to read file safely
             function readFileIfExists(path) {
@@ -34,12 +43,17 @@ jobs:
               }
             }
 
-            // Read banned words from external file
-            const bannedWordsRaw = readFileIfExists('.banned/banned-words.txt');
-            const bannedWords = bannedWordsRaw
-              .split('\n')
-              .map(w => w.trim().toLowerCase())
-              .filter(Boolean);
+            // Helper function to check profanity using Python script
+            function checkProfanityWithPython(text) {
+              try {
+                // Escape text for shell
+                const escapedText = text.replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
+                execSync(`python3 scripts/check_profanity.py "${escapedText}"`, { encoding: 'utf-8' });
+                return false; // No profanity detected
+              } catch (error) {
+                return true; // Profanity detected (script exited with error code)
+              }
+            }
 
             // Read blocked users list
             const blockedUsersRaw = readFileIfExists('.banned/blocked-users.txt');
@@ -89,11 +103,8 @@ jobs:
               return;
             }
 
-            // Check for banned words
-            const foundBannedWords = bannedWords.filter(word => {
-              const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-              return regex.test(commentBody);
-            });
+            // Check for profanity using Python library with built-in banned words
+            const hasProfanity = checkProfanityWithPython(comment.body);
 
             // Spam detection patterns
             const spamPatterns = [
@@ -120,10 +131,10 @@ jobs:
             let violationType = null;
             let classifier = 'OFF_TOPIC';
             
-            if (foundBannedWords.length > 0) {
+            if (hasProfanity) {
               violationType = 'offensive language';
               classifier = 'ABUSE';
-              console.log(`🚫 Banned words detected: ${foundBannedWords.join(', ')}`);
+              console.log(`🚫 Profanity detected in comment`);
             } else if (isSpam || hasExcessiveLinks || hasExcessiveEmojis) {
               violationType = 'spam';
               classifier = 'SPAM';
