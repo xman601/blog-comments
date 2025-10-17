@@ -159,38 +159,41 @@ jobs:
                 await github.graphql(mutation);
                 console.log(`✅ Comment hidden successfully for ${violationType}.`);
 
-                // Create moderation log comment
+                // Optional: Create moderation log comment (commented out to reduce noise)
+                // Uncomment the code below if you want to post a moderation log for each hidden comment
+                /*
                 const logMessage = `⚠️ **Moderation Action**: A comment was hidden for ${violationType}.\\n\\n` +
                   `**Author**: @${comment.user.login}\\n` +
                   `**Reason**: ${violationType}\\n` +
                   `**Time**: ${new Date().toISOString()}\\n\\n` +
                   `*This action was performed automatically. If you believe this was an error, please contact the moderators.*`;
-
-                // Create moderation log comment - handle both discussion and discussion_comment events
+                
                 try {
-                  if (context.payload.discussion) {
-                    // Direct discussion event
-                    await github.rest.discussions.createComment({
-                      discussion_number: context.payload.discussion.number,
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      body: logMessage
-                    });
-                  } else if (context.payload.comment && context.payload.comment.discussion_url) {
-                    // Discussion comment event - extract discussion number from URL
-                    const discussionUrl = context.payload.comment.discussion_url;
-                    const discussionNumber = discussionUrl.split('/').pop();
+                  // Get discussion ID from the comment or discussion
+                  const discussionId = context.payload.discussion?.node_id || 
+                                      context.payload.comment?.discussion_node_id;
+                  
+                  if (discussionId) {
+                    const addCommentMutation = \`
+                      mutation {
+                        addDiscussionComment(input: {
+                          discussionId: "\${discussionId}"
+                          body: "\${logMessage.replace(/"/g, '\\\\"')}"
+                        }) {
+                          comment {
+                            id
+                          }
+                        }
+                      }
+                    \`;
                     
-                    await github.rest.discussions.createComment({
-                      discussion_number: parseInt(discussionNumber),
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      body: logMessage
-                    });
+                    await github.graphql(addCommentMutation);
+                    console.log('✅ Moderation log posted.');
                   }
                 } catch (logError) {
-                  console.log(`⚠️ Could not create moderation log: ${logError.message}`);
+                  console.log(\`⚠️ Could not create moderation log: \${logError.message}\`);
                 }
+                */
 
               } catch (error) {
                 console.error(`❌ Failed to hide comment: ${error.message}`);
