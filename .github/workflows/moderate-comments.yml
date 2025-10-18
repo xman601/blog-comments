@@ -120,9 +120,18 @@ jobs:
 
             const isSpam = spamPatterns.some(pattern => pattern.test(commentBody));
             
-            // Check for excessive links
+            // Check for any links (now blocking all links, not just excessive)
             const linkCount = (commentBody.match(/https?:\/\//g) || []).length;
-            const hasExcessiveLinks = linkCount > 3;
+            const hasLinks = linkCount > 0;
+
+            // Check for images (various formats)
+            const imagePatterns = [
+              /!\[.*?\]\(.*?\)/g, // Markdown images ![alt](url)
+              /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff?)\b/gi, // Image file extensions
+              /<img[^>]*>/gi, // HTML img tags
+              /!\[.*?\]\s*:\s*https?:\/\/[^\s]+/gi, // Reference-style markdown images
+            ];
+            const hasImages = imagePatterns.some(pattern => pattern.test(comment.body));
 
             // Check for excessive emojis
             const emojiCount = (commentBody.match(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu) || []).length;
@@ -135,10 +144,18 @@ jobs:
               violationType = 'offensive language';
               classifier = 'ABUSE';
               console.log(`🚫 Profanity detected in comment`);
-            } else if (isSpam || hasExcessiveLinks || hasExcessiveEmojis) {
+            } else if (hasLinks) {
+              violationType = 'links not allowed';
+              classifier = 'SPAM';
+              console.log(`🚫 Links detected: ${linkCount} link(s) found`);
+            } else if (hasImages) {
+              violationType = 'images not allowed';
+              classifier = 'SPAM';
+              console.log(`🚫 Images detected in comment`);
+            } else if (isSpam || hasExcessiveEmojis) {
               violationType = 'spam';
               classifier = 'SPAM';
-              console.log(`🚫 Spam detected: links=${linkCount}, emojis=${emojiCount}, patterns=${isSpam}`);
+              console.log(`🚫 Spam detected: emojis=${emojiCount}, patterns=${isSpam}`);
             }
 
             if (violationType) {
