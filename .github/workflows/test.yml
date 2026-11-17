@@ -1,0 +1,26 @@
+name: Test moderation
+
+on:
+  push:
+    paths: ['scripts/**', 'requirements.txt', '.banned/**', '.github/workflows/**']
+  pull_request:
+    paths: ['scripts/**', 'requirements.txt', '.banned/**', '.github/workflows/**']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: pip install -r requirements.txt
+      - run: node --test scripts/moderate.test.js
