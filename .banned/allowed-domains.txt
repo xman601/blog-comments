@@ -1,0 +1,23 @@
+# Allowed link domains
+# Links in comments are hidden unless their host is listed here.
+# Subdomains are included (github.com also allows gist.github.com).
+# Links inside `code` or ```code blocks``` are never checked.
+xej.me
+xavierj.me
+github.com
+githubusercontent.com
+gohugo.io
+stackoverflow.com
+stackexchange.com
+superuser.com
+serverfault.com
+askubuntu.com
+developer.mozilla.org
+wikipedia.org
+docs.docker.com
+docker.com
+proxmox.com
+truenas.com
+picoctf.org
+python.org
+nodejs.org

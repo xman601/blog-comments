@@ -16,7 +16,8 @@ The following will result in comment moderation or removal:
 
 - **Profanity and offensive language**: Swearing, slurs, or abusive language
 - **Harassment**: Personal attacks, threats, or bullying
-- **Spam**: Unsolicited advertising, repetitive messages, links, or images
+- **Spam**: Unsolicited advertising, repetitive messages, or embedded images
+- **Links to unknown sites**: Links are allowed only to well-known sites (GitHub, Stack Overflow, official docs, etc.). Links inside `code` are fine.
 - **Off-topic content**: Unrelated discussions or promotional content
 
 ## ⚖️ Moderation Policy
@@ -47,7 +48,8 @@ If you see a comment that violates these guidelines, please report it by:
 ❌ "This is bullshit!"  
 ❌ "Check out my product at spam-site.com!!!"  
 ❌ "![image](https://example.com/image.jpg)"  
-❌ "Visit https://example.com for more info"  
+❌ "Visit https://cheap-deals.example for more info"  
+✅ "The fix is described in https://github.com/owner/repo/issues/1"  
 
 ## 🔄 Updates
 

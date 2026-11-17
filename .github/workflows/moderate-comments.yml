@@ -1,220 +1,45 @@
 name: Moderate Comments
 
+# Only comments are moderated. Discussions themselves are created by giscus
+# (one per blog page) and GitHub can't minimize a Discussion anyway — restrict
+# who can start discussions via the category settings instead.
 on:
   discussion_comment:
     types: [created, edited]
-  discussion:
-    types: [created, edited]
 
 permissions:
-  discussions: write
-  issues: write
   contents: read
+  discussions: write # hide comments
+  issues: write # append to the "Moderation log" issue
+
+concurrency:
+  group: moderate-${{ github.event.comment.id }}
+  cancel-in-progress: false
 
 jobs:
   moderate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.12'
+          cache: pip
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Moderate discussion comments
+      - name: Moderate comment
         uses: actions/github-script@v7
+        env:
+          # Optional: extra banned words, newline- or comma-separated.
+          # Add a repository secret named BANNED_WORDS to use it.
+          BANNED_WORDS: ${{ secrets.BANNED_WORDS }}
         with:
           script: |
-            const fs = require('fs');
-            const { execSync } = require('child_process');
-
-            // Helper function to read file safely
-            function readFileIfExists(path) {
-              try {
-                return fs.readFileSync(path, 'utf-8');
-              } catch (error) {
-                console.log(`⚠️ Could not read ${path}: ${error.message}`);
-                return '';
-              }
-            }
-
-            // Helper function to check profanity using Python script
-            function checkProfanityWithPython(text) {
-              try {
-                // Escape text for shell
-                const escapedText = text.replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
-                execSync(`python3 scripts/check_profanity.py "${escapedText}"`, { encoding: 'utf-8' });
-                return false; // No profanity detected
-              } catch (error) {
-                return true; // Profanity detected (script exited with error code)
-              }
-            }
-
-            // Read blocked users list
-            const blockedUsersRaw = readFileIfExists('.banned/blocked-users.txt');
-            const blockedUsers = blockedUsersRaw
-              .split('\n')
-              .map(u => u.trim().toLowerCase())
-              .filter(Boolean);
-
-            // Read trusted users list
-            const trustedUsersRaw = readFileIfExists('.banned/trusted-users.txt');
-            const trustedUsers = trustedUsersRaw
-              .split('\n')
-              .map(u => u.trim().toLowerCase())
-              .filter(Boolean);
-
-            // Get comment details
-            const comment = context.payload.comment || context.payload.discussion;
-            const commentBody = comment.body.toLowerCase();
-            const author = comment.user.login.toLowerCase();
-            const subjectId = comment.node_id;
-
-            console.log(`🔍 Moderating comment from @${author}`);
-
-            // Skip moderation for trusted users
-            if (trustedUsers.includes(author)) {
-              console.log(`✅ @${author} is a trusted user. Skipping moderation.`);
-              return;
-            }
-
-            // Check if user is blocked
-            if (blockedUsers.includes(author)) {
-              console.log(`🚫 @${author} is blocked. Hiding comment...`);
-              
-              const mutation = `
-                mutation {
-                  minimizeComment(input: {
-                    subjectId: "${subjectId}"
-                    classifier: SPAM
-                  }) {
-                    clientMutationId
-                  }
-                }
-              `;
-
-              await github.graphql(mutation);
-              console.log(`✅ Comment from blocked user @${author} hidden.`);
-              return;
-            }
-
-            // Check for profanity using Python library with built-in banned words
-            const hasProfanity = checkProfanityWithPython(comment.body);
-
-            // Spam detection patterns
-            const spamPatterns = [
-              /https?:\/\/[^\s]+\.(tk|ml|ga|cf|click|link)/i, // Suspicious domains
-              /(buy now|click here|limited time|act fast|urgent|free money|make money|work from home)/i,
-              /([a-z])\1{4,}/i, // Repeated characters (aaaaa)
-              /^.{0,10}$/,  // Very short comments (potential spam)
-              /(.)\\1{10,}/, // Long repeated sequences
-              /[A-Z]{10,}/, // All caps (excessive)
-              /(.)\\s*\\1\\s*\\1\\s*\\1\\s*\\1/i, // Spaced repeated chars (a a a a a)
-              /(.)(-|_|\\.|\\s)\\1(-|_|\\.|\\s)\\1/i, // Pattern like a-a-a or a.a.a
-            ];
-
-            const isSpam = spamPatterns.some(pattern => pattern.test(commentBody));
-            
-            // Check for any links (now blocking all links, not just excessive)
-            const linkCount = (commentBody.match(/https?:\/\//g) || []).length;
-            const hasLinks = linkCount > 0;
-
-            // Check for images (various formats)
-            const imagePatterns = [
-              /!\[.*?\]\(.*?\)/g, // Markdown images ![alt](url)
-              /\.(jpg|jpeg|png|gif|webp|svg|bmp|tiff?)\b/gi, // Image file extensions
-              /<img[^>]*>/gi, // HTML img tags
-              /!\[.*?\]\s*:\s*https?:\/\/[^\s]+/gi, // Reference-style markdown images
-            ];
-            const hasImages = imagePatterns.some(pattern => pattern.test(comment.body));
-
-            // Check for excessive emojis
-            const emojiCount = (commentBody.match(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu) || []).length;
-            const hasExcessiveEmojis = emojiCount > 10;
-
-            let violationType = null;
-            let classifier = 'OFF_TOPIC';
-            
-            if (hasProfanity) {
-              violationType = 'offensive language';
-              classifier = 'ABUSE';
-              console.log(`🚫 Profanity detected in comment`);
-            } else if (hasLinks) {
-              violationType = 'links not allowed';
-              classifier = 'SPAM';
-              console.log(`🚫 Links detected: ${linkCount} link(s) found`);
-            } else if (hasImages) {
-              violationType = 'images not allowed';
-              classifier = 'SPAM';
-              console.log(`🚫 Images detected in comment`);
-            } else if (isSpam || hasExcessiveEmojis) {
-              violationType = 'spam';
-              classifier = 'SPAM';
-              console.log(`🚫 Spam detected: emojis=${emojiCount}, patterns=${isSpam}`);
-            }
-
-            if (violationType) {
-              console.log(`🚫 ${violationType} detected. Hiding comment...`);
-
-              const mutation = `
-                mutation {
-                  minimizeComment(input: {
-                    subjectId: "${subjectId}"
-                    classifier: ${classifier}
-                  }) {
-                    clientMutationId
-                  }
-                }
-              `;
-
-              try {
-                await github.graphql(mutation);
-                console.log(`✅ Comment hidden successfully for ${violationType}.`);
-
-                // Optional: Create moderation log comment (commented out to reduce noise)
-                // Uncomment the code below if you want to post a moderation log for each hidden comment
-                /*
-                const logMessage = `⚠️ **Moderation Action**: A comment was hidden for ${violationType}.\\n\\n` +
-                  `**Author**: @${comment.user.login}\\n` +
-                  `**Reason**: ${violationType}\\n` +
-                  `**Time**: ${new Date().toISOString()}\\n\\n` +
-                  `*This action was performed automatically. If you believe this was an error, please contact the moderators.*`;
-                
-                try {
-                  // Get discussion ID from the comment or discussion
-                  const discussionId = context.payload.discussion?.node_id || 
-                                      context.payload.comment?.discussion_node_id;
-                  
-                  if (discussionId) {
-                    const addCommentMutation = \`
-                      mutation {
-                        addDiscussionComment(input: {
-                          discussionId: "\${discussionId}"
-                          body: "\${logMessage.replace(/"/g, '\\\\"')}"
-                        }) {
-                          comment {
-                            id
-                          }
-                        }
-                      }
-                    \`;
-                    
-                    await github.graphql(addCommentMutation);
-                    console.log('✅ Moderation log posted.');
-                  }
-                } catch (logError) {
-                  console.log(\`⚠️ Could not create moderation log: \${logError.message}\`);
-                }
-                */
-
-              } catch (error) {
-                console.error(`❌ Failed to hide comment: ${error.message}`);
-              }
-            } else {
-              console.log(`✅ Comment from @${author} passed all filters.`);
-            }
+            const moderate = require(`${process.env.GITHUB_WORKSPACE}/scripts/moderate.js`);
+            await moderate({ github, context, core });
